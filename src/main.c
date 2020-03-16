@@ -142,7 +142,7 @@ int main(struct sysroot_buffer *sysroot)
 		goto end;
 	}
 
-	LOG(DTB_FILENAME " loaded at 0x%08X, size: %d\n", LINUX_ADDR, nread);
+	LOG(DTB_FILENAME " loaded at 0x%08X, size: %d\n", DTB_ADDR, nread);
 
 	LOG("Jumping to the kernel entrypoint...\n");
 
