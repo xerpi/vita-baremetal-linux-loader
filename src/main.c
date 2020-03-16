@@ -1,5 +1,6 @@
 #include <stdio.h>
 #include <string.h>
+#include <stdarg.h>
 #include <baremetal/pervasive.h>
 #include <baremetal/cdram.h>
 #include <baremetal/gpio.h>
@@ -9,10 +10,9 @@
 #include <baremetal/display.h>
 #include <baremetal/ctrl.h>
 #include <baremetal/msif.h>
-#include <baremetal/draw.h>
 #include <baremetal/font.h>
+#include <baremetal/uart.h>
 #include <baremetal/utils.h>
-#include "log.h"
 #include "ff.h"
 
 #define LINUX_FILENAME	"/linux/zImage"
@@ -32,6 +32,20 @@ static const unsigned char msif_key[32] = {
 	0xE0, 0x04, 0x8D, 0x44, 0x3D, 0x63, 0xC9, 0x2C,
 	0x0B, 0x27, 0x13, 0x55, 0x41, 0xD9, 0x2E, 0xC4
 };
+
+static void LOG(const char *str, ...)
+{
+	static int console_y = 200;
+	char buf[256];
+	va_list argptr;
+
+	va_start(argptr, str);
+	vsnprintf(buf, sizeof(buf), str, argptr);
+	va_end(argptr);
+
+	uart_print(0, buf);
+	font_draw_string(10, console_y+=20, WHITE, buf);
+}
 
 static void cpu123_wait(unsigned int cpu_id)
 {
@@ -91,12 +105,20 @@ int main(struct sysroot_buffer *sysroot)
 	pervasive_reset_exit_i2c(1);
 
 	uart_init(0, 115200);
-
-	LOG("Vita baremetal Linux loader started!\n");
+	uart_print(0, "Vita baremetal Linux loader UART initialized\n");
 
 	cdram_enable();
 	i2c_init_bus(1);
 	syscon_init();
+
+	if (sysroot_model_is_dolce())
+		display_init(DISPLAY_TYPE_HDMI);
+	else if (sysroot_model_is_vita2k())
+		display_init(DISPLAY_TYPE_LCD);
+	else
+		display_init(DISPLAY_TYPE_OLED);
+
+	LOG("Vita baremetal Linux loader started!\n");
 
 	if (!pervasive_msif_get_card_insert_state()) {
 		LOG("Memory card not inserted.\n");
@@ -116,15 +138,6 @@ int main(struct sysroot_buffer *sysroot)
 	}
 
 	LOG("Memory card mounted!\n");
-
-	if (sysroot_model_is_dolce())
-		display_init(DISPLAY_TYPE_HDMI);
-	else if (sysroot_model_is_vita2k())
-		display_init(DISPLAY_TYPE_LCD);
-	else
-		display_init(DISPLAY_TYPE_OLED);
-
-	LOG("Display initialized!\n");
 
 	LOG("Loading " LINUX_FILENAME " ...\n");
 	res = file_load(LINUX_FILENAME, LINUX_ADDR, &nread);

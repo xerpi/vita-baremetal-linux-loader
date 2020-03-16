@@ -10,7 +10,7 @@ AS	= $(PREFIX)-as
 OBJCOPY	= $(PREFIX)-objcopy
 CFLAGS	= -I$(INCDIR) -IFatFs -mcpu=cortex-a9 -mthumb-interwork \
 	  -O0 -Wall -Wno-unused-const-variable -Wno-main
-LDFLAGS	= -T linker.ld -nostartfiles -nostdlib -lgcc -lm -lbaremetal
+LDFLAGS	= -T linker.ld -nostartfiles -nostdlib -lgcc -lbaremetal
 ASFLAGS	=
 DEPS	= $(OBJS:.o=.d)
 
