@@ -15,11 +15,16 @@
 #include <baremetal/utils.h>
 #include "ff.h"
 
-#define LINUX_FILENAME	"/linux/zImage"
-#define DTB_FILENAME	"/linux/vita.dtb"
+#define LINUX_DIR	"/linux/"
 
-#define DTB_ADDR	0x4A000000
-#define LINUX_ADDR	0x44000000
+#define ZIMAGE 		LINUX_DIR "zImage"
+#define VITA1000_DTB 	LINUX_DIR "vita1000.dtb"
+#define VITA2000_DTB 	LINUX_DIR "vita2000.dtb"
+#define PSTV_DTB 	LINUX_DIR "pstv.dtb"
+#define FALLBACK_DTB	LINUX_DIR "vita.dtb"
+
+#define DTB_LOAD_ADDR	0x4A000000
+#define LINUX_LOAD_ADDR	0x44000000
 
 #define CPU123_WAIT_BASE 0x1F007F00
 
@@ -79,11 +84,28 @@ static FRESULT file_load(const char *path, uintptr_t addr, UINT *nread)
 	return FR_OK;
 }
 
+static FRESULT file_load_log(const char *path, uintptr_t addr)
+{
+	FRESULT res;
+	UINT nread;
+
+	LOG("Loading '%s'...\n", path);
+
+	res = file_load(path, addr, &nread);
+	if (res != FR_OK) {
+		LOG("Error loading '%s': %d\n", path, res);
+		return res;
+	}
+
+	LOG("Loaded '%s' at 0x%08X, size: %dKiB\n", path, addr, nread / 1024);
+
+	return FR_OK;
+}
+
 int main(struct sysroot_buffer *sysroot)
 {
 	FATFS fs;
 	FRESULT res;
-	UINT nread;
 	unsigned int *bss;
 	unsigned int cpu_id = get_cpu_id();
 
@@ -105,7 +127,6 @@ int main(struct sysroot_buffer *sysroot)
 	pervasive_reset_exit_i2c(1);
 
 	uart_init(0, 115200);
-	uart_print(0, "Vita baremetal Linux loader UART initialized\n");
 
 	cdram_enable();
 	i2c_init_bus(1);
@@ -122,7 +143,7 @@ int main(struct sysroot_buffer *sysroot)
 
 	if (!pervasive_msif_get_card_insert_state()) {
 		LOG("Memory card not inserted.\n");
-		goto end;
+		goto fatal_error;
 	}
 
 	msif_init();
@@ -134,35 +155,46 @@ int main(struct sysroot_buffer *sysroot)
 	res = f_mount(&fs, "/", 0);
 	if (res != FR_OK) {
 		LOG("Error mounting Memory card: %d\n", res);
-		goto end;
+		goto fatal_error;
 	}
 
 	LOG("Memory card mounted!\n");
 
-	LOG("Loading " LINUX_FILENAME " ...\n");
-	res = file_load(LINUX_FILENAME, LINUX_ADDR, &nread);
-	if (res != FR_OK) {
-		LOG("Error loading " LINUX_FILENAME ": %d\n", res);
-		goto end;
+	res = file_load_log(ZIMAGE, LINUX_LOAD_ADDR);
+	if (res != FR_OK)
+		goto fatal_error;
+
+	if (sysroot_model_is_vita()) {
+		res = file_load_log(VITA1000_DTB, DTB_LOAD_ADDR);
+	} else if (sysroot_model_is_vita2k()) {
+		res = file_load_log(VITA2000_DTB, DTB_LOAD_ADDR);
+	} else if (sysroot_model_is_dolce()) {
+		res = file_load_log(PSTV_DTB, DTB_LOAD_ADDR);
+	} else {
+		LOG("Unsupported Vita model.\n");
+		goto fatal_error;
 	}
 
-	LOG(LINUX_FILENAME " loaded at 0x%08X, size: %d\n", LINUX_ADDR, nread);
-
-	LOG("Loading " DTB_FILENAME " ...\n");
-	res = file_load(DTB_FILENAME, DTB_ADDR, &nread);
 	if (res != FR_OK) {
-		LOG("Error loading " DTB_FILENAME ": %d\n", res);
-		goto end;
+		LOG("Trying with the fallback DTB...\n");
+		res = file_load_log(FALLBACK_DTB, DTB_LOAD_ADDR);
+		if (res != FR_OK)
+			goto fatal_error;
 	}
 
-	LOG(DTB_FILENAME " loaded at 0x%08X, size: %d\n", DTB_ADDR, nread);
+	((void (*)(int, int, uintptr_t))LINUX_LOAD_ADDR)(0, 0, DTB_LOAD_ADDR);
 
-	LOG("Jumping to the kernel entrypoint...\n");
+fatal_error:
+	LOG("\nPress X to restart.\n");
 
-	((void (*)(int, int, uintptr_t))LINUX_ADDR)(0, 0, DTB_ADDR);
+	while (1) {
+		struct ctrl_data ctrl;
+		ctrl_read(&ctrl);
+		if (CTRL_BUTTON_HELD(ctrl.buttons, CTRL_CROSS))
+			break;
+	}
 
-end:
-	syscon_reset_device(SYSCON_RESET_TYPE_POWEROFF, 2);
+	syscon_reset_device(SYSCON_RESET_TYPE_COLD_RESET, 0);
 
 	return 0;
 }
