@@ -182,6 +182,8 @@ int main(struct sysroot_buffer *sysroot)
 			goto fatal_error;
 	}
 
+	LOG("Jumping to Linux!\n");
+
 	((void (*)(int, int, uintptr_t))LINUX_LOAD_ADDR)(0, 0, DTB_LOAD_ADDR);
 
 fatal_error:
